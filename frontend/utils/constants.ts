@@ -36,6 +36,13 @@ export const UI_CONFIG = {
   SUMMARY_REFRESH: 30000
 };
 
+export const MESH_SERVER_CONFIG = {
+  DEFAULT_HOST: '172.31.99.246',
+  DEFAULT_PORT: 8765,
+  STORAGE_KEY_HOST: 'CRISIS_MESH_GATEWAY_HOST',
+  STORAGE_KEY_PORT: 'CRISIS_MESH_GATEWAY_PORT',
+};
+
 export const CRITICAL_KEYWORDS = ['trapped', 'collapse', 'fire', 'severe', 'drowning', 'unconscious', 'bleeding'];
 export const HIGH_KEYWORDS = ['elderly', 'child', 'infant', 'medical', 'injury', 'broken', 'diabetic'];
 export const MEDIUM_KEYWORDS = ['food', 'water', 'shelter', 'blanket', 'stranded', 'flooded'];

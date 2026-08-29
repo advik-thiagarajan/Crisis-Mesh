@@ -4,10 +4,12 @@ import * as Location from 'expo-location';
 import Database from '../services/database';
 import classifyPriority from '../services/priorityEngine';
 import { CHENNAI } from '../utils/constants';
+import { useMesh } from '../services/MeshContext';
 
 export const SOSScreen = ({ route, navigation }: any) => {
-  const mesh = route.params?.mesh;
-  const deviceId = route.params?.deviceId || 'device-local';
+  const meshContext = useMesh();
+  const mesh = route.params?.mesh || meshContext.mesh;
+  const deviceId = route.params?.deviceId || meshContext.deviceId || 'device-local';
 
   const [description, setDescription] = useState('');
   const [numPeople, setNumPeople] = useState('1');

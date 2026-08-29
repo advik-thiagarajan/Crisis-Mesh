@@ -41,11 +41,12 @@ export const optimizeRoute = (
   let index = 1;
 
   const criticals = sosReports.filter((s) => s.priority === 'CRITICAL');
+  const veryHighs = sosReports.filter((s) => s.priority === 'VERY HIGH');
   const highs = sosReports.filter((s) => s.priority === 'HIGH');
   const mediums = sosReports.filter((s) => s.priority === 'MEDIUM');
   const lows = sosReports.filter((s) => s.priority === 'LOW');
 
-  for (const priorityGroup of [criticals, highs, mediums, lows]) {
+  for (const priorityGroup of [criticals, veryHighs, highs, mediums, lows]) {
     if (route.length >= maxStops) break;
 
     const unvisited = [...priorityGroup];

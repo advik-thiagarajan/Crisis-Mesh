@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import websockets
 
@@ -57,6 +57,44 @@ async def test_mesh_network():
                     assert received["data"]["id"] == "SOS-TEST-999"
                     assert received["data"]["priority"] == "CRITICAL"
                     print(f"  [OK] Node 2 received relayed SOS: {received['data']['description']} (Hop: {received['relayCount']})")
+                    break
+            # Node 1 broadcasts an escalated SOS with User Profile
+            sos_escalated = {
+                "type": "SOS",
+                "id": "msg-test-102",
+                "data": {
+                    "id": "SOS-AUTO-TEST-001",
+                    "timestamp": 123456790,
+                    "lat": 13.0830,
+                    "lng": 80.2710,
+                    "description": "[AUTOMATED TIMEOUT] Escalated check-in failure",
+                    "priority": "VERY HIGH",
+                    "numPeople": 1,
+                    "deviceId": "test-phone-1",
+                    "synced": True,
+                    "relayCount": 0,
+                    "escalationLevel": 4,
+                    "isAutomated": True,
+                    "userProfile": {
+                        "name": "Advik",
+                        "age": 24,
+                        "bloodType": "O+",
+                        "medicalHistory": ["Diabetes", "Cardiac Issues"],
+                        "emergencyContactName": "Priya",
+                        "emergencyContactNumber": "+91 9876543210"
+                    }
+                }
+            }
+            await ws1.send(json.dumps(sos_escalated))
+            print("  [OK] Node 1 broadcasted escalated SOS (VERY HIGH + Medical Profile).")
+
+            while True:
+                received = json.loads(await ws2.recv())
+                if received["type"] == "SOS" and received["data"]["id"] == "SOS-AUTO-TEST-001":
+                    assert received["data"]["priority"] == "VERY HIGH"
+                    assert received["data"]["userProfile"]["bloodType"] == "O+"
+                    assert "Diabetes" in received["data"]["userProfile"]["medicalHistory"]
+                    print(f"  [OK] Node 2 received escalated SOS: {received['data']['userProfile']['name']} (Blood: {received['data']['userProfile']['bloodType']}, Med: {received['data']['userProfile']['medicalHistory']})")
                     break
 
     print("\nALL OFFLINE MESH PEER-TO-PEER TESTS PASSED SUCCESSFULLY!")

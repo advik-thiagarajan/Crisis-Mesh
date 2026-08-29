@@ -1,17 +1,32 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Database from '../services/database';
 import { useMesh } from '../services/MeshContext';
-import { MESH_SERVER_CONFIG } from '../utils/constants';
+import { MESH_SERVER_CONFIG, PROFILE_STORAGE_KEY, FLOOD_SIMULATION_KEY } from '../utils/constants';
 import { detectBundlerHost } from '../services/bitchat';
+import { UserProfile } from '../utils/types';
 
-export const SettingsScreen = () => {
+export const SettingsScreen = ({ navigation }: any) => {
   const { mesh, deviceId, isConnected, peerCount } = useMesh();
   const [gatewayHost, setGatewayHost] = useState(MESH_SERVER_CONFIG.DEFAULT_HOST);
   const [gatewayPort, setGatewayPort] = useState(MESH_SERVER_CONFIG.DEFAULT_PORT.toString());
   const [peers, setPeers] = useState<any[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY);
+        if (stored) {
+          setUserProfile(JSON.parse(stored));
+        } else {
+          const dbProfile = await Database.getUserProfile();
+          if (dbProfile) setUserProfile(dbProfile);
+        }
+      } catch (_) {}
+    })();
+
     if (mesh) {
       const status = mesh.getGatewayStatus();
       setGatewayHost(status.host);
@@ -68,72 +83,83 @@ export const SettingsScreen = () => {
       description: `[DIAGNOSTIC TEST] Radio link check from node ${deviceId.slice(-6)}`,
       priority: 'HIGH' as const,
       numPeople: 2,
-      deviceId: deviceId,
+      deviceId,
       synced: true,
-      relayCount: 0
+      relayCount: 0,
+      userProfile: userProfile || undefined
     };
 
     await Database.addSOS(testSOS);
     mesh.broadcastSOS(testSOS);
-    Alert.alert(
-      'Test Alert Transmitted',
-      `Broadcasted diagnostic signal to ${peerCount} peer(s). Check your other phone(s) now!`
-    );
+    Alert.alert('Test Transmitted', `Broadcasted diagnostic packet to ${peerCount} connected peer(s).`);
   };
 
-  const handleInjectMockData = async () => {
-    const mockReports = [
-      {
-        id: `mock-${Date.now()}-1`,
-        timestamp: Date.now(),
-        lat: 13.0360,
-        lng: 80.2600,
-        description: 'Building collapse near coastline, 5 people trapped under debris.',
-        priority: 'CRITICAL' as const,
-        numPeople: 5,
-        deviceId: 'peer-device-101',
-        synced: true
-      },
-      {
-        id: `mock-${Date.now()}-2`,
-        timestamp: Date.now() - 50000,
-        lat: 13.0056,
-        lng: 80.2621,
-        description: 'Clean drinking water shortage, elderly citizens stranded.',
-        priority: 'HIGH' as const,
-        numPeople: 3,
-        deviceId: 'peer-device-102',
-        synced: true
-      }
-    ];
-
-    for (const item of mockReports) {
-      await Database.addSOS(item);
-    }
-    Alert.alert('Mock Data Generated', 'Inserted mock emergency reports into local database.');
+  const handleResetFloodSimulation = async () => {
+    await AsyncStorage.removeItem(FLOOD_SIMULATION_KEY);
+    Alert.alert(
+      'Simulation Reset',
+      'Flood Disaster simulation state has been reset. When you return to the Dashboard, the emergency alert will trigger fresh!'
+    );
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>System Control & Node Diagnostics</Text>
-      
-      {/* Node Identity Box */}
+      <Text style={styles.title}>CrisisMesh Node Diagnostics</Text>
+
+      {/* Emergency Medical Profile Card */}
+      <View style={[styles.section, { borderColor: '#E53E3E', borderWidth: 1.5 }]}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <Text style={[styles.sectionHeader, { color: '#C53030', marginBottom: 0 }]}>
+            🛡️ My Emergency Medical Profile
+          </Text>
+          <TouchableOpacity
+            style={styles.editProfileBtn}
+            onPress={() => navigation.navigate('ProfileRegistration', { isEditing: true })}
+          >
+            <Text style={styles.editProfileText}>✏️ Edit</Text>
+          </TouchableOpacity>
+        </View>
+
+        {userProfile ? (
+          <View style={styles.profileSummaryBox}>
+            <Text style={styles.profileName}>{userProfile.name}, {userProfile.age}y</Text>
+            <Text style={styles.profileDetail}>🩸 Blood Group: <Text style={{ fontWeight: 'bold', color: '#C53030' }}>{userProfile.bloodType}</Text></Text>
+            <Text style={styles.profileDetail}>
+              ⚠️ Pre-known Conditions: {userProfile.medicalHistory?.join(', ') || 'None'}
+              {userProfile.customMedicalNotes ? ` (${userProfile.customMedicalNotes})` : ''}
+            </Text>
+            <Text style={styles.profileDetail}>📞 Emergency Contact: {userProfile.emergencyContactName} ({userProfile.emergencyContactNumber})</Text>
+            {userProfile.address ? <Text style={styles.profileDetail}>🏠 Address: {userProfile.address}</Text> : null}
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: '#C53030' }]}
+            onPress={() => navigation.navigate('ProfileRegistration', { isEditing: false })}
+          >
+            <Text style={styles.buttonText}>+ Create Emergency Medical Profile</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Local Hardware Node Status */}
       <View style={styles.infoBox}>
         <View style={styles.statusRow}>
           <Text style={styles.infoLabel}>Node Status:</Text>
-          <View style={[styles.badge, { backgroundColor: isConnected ? '#C6F6D5' : '#FEEBC8' }]}>
+          <View style={[styles.badge, { backgroundColor: isConnected ? '#C6F6D5' : '#FEFCBF' }]}>
             <Text style={[styles.badgeText, { color: isConnected ? '#22543D' : '#744210' }]}>
-              {isConnected ? 'ONLINE & SYNCED' : 'CONNECTING...'}
+              {isConnected ? 'ONLINE & SYNCED' : 'SEARCHING...'}
             </Text>
           </View>
         </View>
-        <Text style={styles.infoText}>Local Node ID: {deviceId || 'Initializing...'}</Text>
-        <Text style={styles.infoText}>Synchronized Peers in Range: {peerCount}</Text>
+
+        <Text style={styles.infoText}>Hardware Device ID: {deviceId}</Text>
+        <Text style={styles.infoText}>Gateway Endpoint: ws://{gatewayHost}:{gatewayPort}</Text>
+        <Text style={styles.infoText}>Active Mesh Peers: {peerCount}</Text>
       </View>
 
       {/* Connected Peers List */}
       <View style={styles.section}>
-        <Text style={styles.sectionHeader}>Nearby Mesh Nodes ({peers.length}):</Text>
+        <Text style={styles.sectionHeader}>Connected Peer Nodes ({peers.length}):</Text>
         {peers.length === 0 ? (
           <Text style={styles.emptyText}>
             No other nodes detected yet. Open CrisisMesh on another phone on this network to sync.
@@ -181,21 +207,21 @@ export const SettingsScreen = () => {
         </View>
       </View>
 
-      {/* Diagnostic Actions */}
+      {/* Simulation & Demo Actions */}
       <View style={styles.section}>
-        <Text style={styles.sectionHeader}>Diagnostics & Testing:</Text>
+        <Text style={styles.sectionHeader}>Disaster Simulation & Testing:</Text>
+        <TouchableOpacity 
+          style={[styles.button, { backgroundColor: '#319795' }]} 
+          onPress={handleResetFloodSimulation}
+        >
+          <Text style={styles.buttonText}>🌊 Re-trigger Simulated Heavy Flood Alert</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity 
           style={[styles.button, { backgroundColor: '#DD6B20' }]} 
           onPress={handleBroadcastTestSOS}
         >
           <Text style={styles.buttonText}>📡 Transmit Diagnostic Test Alert</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[styles.button, { backgroundColor: '#319795' }]} 
-          onPress={handleInjectMockData}
-        >
-          <Text style={styles.buttonText}>Populate Test Scenarios</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -221,5 +247,10 @@ const styles = StyleSheet.create({
   peerStatus: { fontSize: 11, color: '#38A169', fontWeight: 'bold' },
   input: { borderWidth: 1, borderColor: '#CBD5E0', borderRadius: 6, padding: 10, marginBottom: 10, fontSize: 14, backgroundColor: '#FFF' },
   button: { backgroundColor: '#3182CE', padding: 12, borderRadius: 6, alignItems: 'center', marginBottom: 8 },
-  buttonText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 }
-});
+  buttonText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
+  editProfileBtn: { backgroundColor: '#EDF2F7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  editProfileText: { color: '#2B6CB0', fontSize: 12, fontWeight: 'bold' },
+  profileSummaryBox: { backgroundColor: '#FFF5F5', padding: 10, borderRadius: 6, borderWidth: 1, borderColor: '#FED7D7' },
+  profileName: { fontSize: 14, fontWeight: 'bold', color: '#2D3748' },
+  profileDetail: { fontSize: 12, color: '#4A5568', marginTop: 3 }
+});

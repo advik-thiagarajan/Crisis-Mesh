@@ -1,4 +1,17 @@
-export type Priority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+export type Priority = 'CRITICAL' | 'VERY HIGH' | 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface UserProfile {
+  name: string;
+  email: string;
+  address: string;
+  bloodType: string;
+  medicalHistory: string[]; // e.g. ['Diabetes', 'Thyroid', 'Cardiac Issues']
+  customMedicalNotes?: string;
+  age: number;
+  emergencyContactName: string;
+  emergencyContactNumber: string;
+  registeredAt: number;
+}
 
 export interface SOSReport {
   id: string;
@@ -13,6 +26,9 @@ export interface SOSReport {
   voiceNotes?: string[];
   synced: boolean;
   relayCount?: number;
+  userProfile?: UserProfile;
+  escalationLevel?: number; // 1 = Low, 2 = Medium, 3 = High, 4 = Very High, 5 = Critical
+  isAutomated?: boolean;
 }
 
 export interface MeshMessage {
@@ -41,6 +57,7 @@ export interface MapRegion {
 export interface SummaryData {
   totalReports: number;
   criticalCount: number;
+  veryHighCount: number;
   highCount: number;
   mediumCount: number;
   lowCount: number;

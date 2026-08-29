@@ -16,6 +16,7 @@ export const SOSScreen = ({ route, navigation }: any) => {
   const [hasInjury, setHasInjury] = useState(false);
   const [location, setLocation] = useState<{ lat: number; lng: number }>({ lat: CHENNAI.LAT, lng: CHENNAI.LNG });
   const [isSending, setIsSending] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -24,6 +25,10 @@ export const SOSScreen = ({ route, navigation }: any) => {
         let loc = await Location.getCurrentPositionAsync({});
         setLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
       }
+      try {
+        const prof = await Database.getUserProfile();
+        if (prof) setUserProfile(prof);
+      } catch (_) {}
     })();
   }, []);
 
@@ -45,7 +50,8 @@ export const SOSScreen = ({ route, navigation }: any) => {
       numPeople: parseInt(numPeople) || 1,
       deviceId,
       synced: true,
-      relayCount: 0
+      relayCount: 0,
+      userProfile: userProfile || undefined
     };
 
     await Database.addSOS(sosPayload);

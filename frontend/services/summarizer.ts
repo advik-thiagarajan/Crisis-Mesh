@@ -7,6 +7,7 @@ export const generateSummary = (sosReports: SOSReport[]): SummaryData => {
     return {
       totalReports: 0,
       criticalCount: 0,
+      veryHighCount: 0,
       highCount: 0,
       mediumCount: 0,
       lowCount: 0,
@@ -16,6 +17,7 @@ export const generateSummary = (sosReports: SOSReport[]): SummaryData => {
   }
 
   const criticals = sosReports.filter(s => s.priority === 'CRITICAL');
+  const veryHighs = sosReports.filter(s => s.priority === 'VERY HIGH');
   const highs = sosReports.filter(s => s.priority === 'HIGH');
   const mediums = sosReports.filter(s => s.priority === 'MEDIUM');
   const lows = sosReports.filter(s => s.priority === 'LOW');
@@ -29,11 +31,12 @@ export const generateSummary = (sosReports: SOSReport[]): SummaryData => {
   if (combinedText.includes('child') || combinedText.includes('elderly')) threats.push('Vulnerable Groups');
 
   const threatString = threats.length > 0 ? threats.join(', ') : 'General Emergency Services Required';
-  const summaryText = `[TOTAL: ${totalReports} Incidents] | CRITICAL: ${criticals.length} | HIGH: ${highs.length} | MED: ${mediums.length} | LOW: ${lows.length}. Vectors: ${threatString}.`;
+  const summaryText = `[TOTAL: ${totalReports} Incidents] | CRIT: ${criticals.length} | V.HIGH: ${veryHighs.length} | HIGH: ${highs.length} | MED: ${mediums.length} | LOW: ${lows.length}. Vectors: ${threatString}.`;
 
   return {
     totalReports,
     criticalCount: criticals.length,
+    veryHighCount: veryHighs.length,
     highCount: highs.length,
     mediumCount: mediums.length,
     lowCount: lows.length,

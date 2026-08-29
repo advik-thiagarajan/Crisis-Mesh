@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
-import { SOSReport } from '../utils/types';
-import { DB_CONFIG } from '../utils/constants';
+import { SOSReport, UserProfile } from '../utils/types';
+import { DB_CONFIG, PRIORITY_ORDER } from '../utils/constants';
 
 class Database {
   private db: SQLite.SQLiteDatabase | null = null;
@@ -11,6 +11,20 @@ class Database {
       console.log('[DB] Opening database:', DB_CONFIG.NAME);
 
       await this.db.execAsync(`
+        CREATE TABLE IF NOT EXISTS user_profiles (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          email TEXT,
+          address TEXT,
+          blood_type TEXT,
+          medical_history TEXT,
+          custom_medical_notes TEXT,
+          age INTEGER,
+          emergency_contact_name TEXT,
+          emergency_contact_number TEXT,
+          registered_at INTEGER
+        );
+
         CREATE TABLE IF NOT EXISTS sos_reports (
           id TEXT PRIMARY KEY,
           timestamp INTEGER,
@@ -21,6 +35,9 @@ class Database {
           num_people INTEGER,
           device_id TEXT,
           synced INTEGER DEFAULT 0,
+          user_metadata TEXT,
+          escalation_level INTEGER DEFAULT 0,
+          is_automated INTEGER DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -38,10 +55,67 @@ class Database {
         CREATE INDEX IF NOT EXISTS idx_msg_type ON mesh_messages(type);
       `);
 
-      console.log('[DB] Database schema operational');
+      // Safe column additions for existing installs
+      try { await this.db.execAsync(`ALTER TABLE sos_reports ADD COLUMN user_metadata TEXT;`); } catch (_) {}
+      try { await this.db.execAsync(`ALTER TABLE sos_reports ADD COLUMN escalation_level INTEGER DEFAULT 0;`); } catch (_) {}
+      try { await this.db.execAsync(`ALTER TABLE sos_reports ADD COLUMN is_automated INTEGER DEFAULT 0;`); } catch (_) {}
+
+      console.log('[DB] Database schema operational with profile and metadata support');
     } catch (error) {
       console.error('[DB] Initialization error:', error);
       throw error;
+    }
+  }
+
+  async saveUserProfile(profile: UserProfile): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    try {
+      await this.db.runAsync(
+        `INSERT OR REPLACE INTO user_profiles
+         (id, name, email, address, blood_type, medical_history, custom_medical_notes, age, emergency_contact_name, emergency_contact_number, registered_at)
+         VALUES ('current_user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          profile.name,
+          profile.email,
+          profile.address,
+          profile.bloodType,
+          JSON.stringify(profile.medicalHistory),
+          profile.customMedicalNotes || '',
+          profile.age,
+          profile.emergencyContactName,
+          profile.emergencyContactNumber,
+          profile.registeredAt || Date.now()
+        ]
+      );
+      console.log('[DB] Saved user profile for:', profile.name);
+    } catch (error) {
+      console.error('[DB] Error saving user profile:', error);
+      throw error;
+    }
+  }
+
+  async getUserProfile(): Promise<UserProfile | null> {
+    if (!this.db) throw new Error('Database not initialized');
+    try {
+      const row = await this.db.getFirstAsync<any>(
+        `SELECT * FROM user_profiles WHERE id = 'current_user'`
+      );
+      if (!row) return null;
+      return {
+        name: row.name,
+        email: row.email,
+        address: row.address,
+        bloodType: row.blood_type,
+        medicalHistory: row.medical_history ? JSON.parse(row.medical_history) : [],
+        customMedicalNotes: row.custom_medical_notes,
+        age: row.age,
+        emergencyContactName: row.emergency_contact_name,
+        emergencyContactNumber: row.emergency_contact_number,
+        registeredAt: row.registered_at
+      };
+    } catch (error) {
+      console.error('[DB] Error reading user profile:', error);
+      return null;
     }
   }
 
@@ -49,9 +123,9 @@ class Database {
     if (!this.db) throw new Error('Database not initialized');
     try {
       await this.db.runAsync(
-        `INSERT OR IGNORE INTO sos_reports 
-         (id, timestamp, lat, lng, description, priority, num_people, device_id, synced)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO sos_reports 
+         (id, timestamp, lat, lng, description, priority, num_people, device_id, synced, user_metadata, escalation_level, is_automated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           sos.id,
           sos.timestamp,
@@ -61,10 +135,13 @@ class Database {
           sos.priority,
           sos.numPeople,
           sos.deviceId,
-          sos.synced ? 1 : 0
+          sos.synced ? 1 : 0,
+          sos.userProfile ? JSON.stringify(sos.userProfile) : null,
+          sos.escalationLevel || 0,
+          sos.isAutomated ? 1 : 0
         ]
       );
-      console.log('[DB] Registered SOS:', sos.id);
+      console.log('[DB] Registered SOS:', sos.id, `[${sos.priority}]`);
     } catch (error) {
       console.error('[DB] Error adding SOS:', error);
     }
@@ -74,21 +151,41 @@ class Database {
     if (!this.db) throw new Error('Database not initialized');
     try {
       const result = await this.db.getAllAsync<any>(
-        `SELECT * FROM sos_reports ORDER BY timestamp DESC LIMIT 100`
+        `SELECT * FROM sos_reports LIMIT 100`
       );
-      return result.map(row => ({
-        id: row.id,
-        timestamp: row.timestamp,
-        lat: row.lat,
-        lng: row.lng,
-        description: row.description,
-        priority: row.priority,
-        numPeople: row.num_people,
-        deviceId: row.device_id,
-        synced: row.synced === 1,
-        images: [],
-        voiceNotes: []
-      }));
+      const mapped: SOSReport[] = result.map(row => {
+        let userProfile: UserProfile | undefined = undefined;
+        if (row.user_metadata) {
+          try {
+            userProfile = JSON.parse(row.user_metadata);
+          } catch (_) {}
+        }
+        return {
+          id: row.id,
+          timestamp: row.timestamp,
+          lat: row.lat,
+          lng: row.lng,
+          description: row.description,
+          priority: row.priority,
+          numPeople: row.num_people,
+          deviceId: row.device_id,
+          synced: row.synced === 1,
+          userProfile,
+          escalationLevel: row.escalation_level || 0,
+          isAutomated: row.is_automated === 1,
+          images: [],
+          voiceNotes: []
+        };
+      });
+
+      // Strict Priority Ordering: CRITICAL > VERY HIGH > HIGH > MEDIUM > LOW
+      mapped.sort((a, b) => {
+        const pDiff = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
+        if (pDiff !== 0) return pDiff;
+        return b.timestamp - a.timestamp;
+      });
+
+      return mapped;
     } catch (error) {
       console.error('[DB] Error fetching SOS reports:', error);
       return [];

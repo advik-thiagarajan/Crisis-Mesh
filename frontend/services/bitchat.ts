@@ -1,6 +1,6 @@
 import { NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MeshMessage, SOSReport, Device } from '../utils/types';
+import { MeshMessage, SOSReport, Device, ChatMessage } from '../utils/types';
 import { BITCHAT_CONFIG, MESH_SERVER_CONFIG } from '../utils/constants';
 import { getDeviceName } from '../utils/deviceId';
 
@@ -29,8 +29,10 @@ class BitChatMesh {
   private seenMessageIds: Set<string> = new Set();
   private connectedDevices: Map<string, Device> = new Map();
   private deviceId: string;
+  private username: string = '';
   private isInitialized: boolean = false;
   private pendingMessages: MeshMessage[] = [];
+  private chatMessageHandlers: ((msg: ChatMessage) => void)[] = [];
 
   // WebSocket Transport State
   private ws: WebSocket | null = null;
@@ -90,7 +92,7 @@ class BitChatMesh {
         const registerPayload = {
           type: 'REGISTER',
           deviceId: this.deviceId,
-          name: getDeviceName(this.deviceId)
+          name: this.username || getDeviceName(this.deviceId)
         };
         this.sendRaw(registerPayload);
 
@@ -214,6 +216,25 @@ class BitChatMesh {
       };
       console.log(`[BitChat] Received RESCUE_PING for target: ${meshMsg.targetDeviceId}, SOS: ${meshMsg.sosId}`);
       this.handleIncomingMessage(meshMsg);
+    } else if (type === 'PEER_CHAT') {
+      const chatData: ChatMessage = payload.chatPayload || {
+        id: payload.id || `chat-${Date.now()}`,
+        senderId: payload.senderId,
+        senderUsername: payload.senderUsername || 'Anonymous Peer',
+        targetDeviceId: payload.targetDeviceId,
+        targetUsername: payload.targetUsername,
+        text: payload.text || '',
+        timestamp: payload.timestamp || Date.now()
+      };
+
+      console.log(`[BitChat] Received PEER_CHAT from @${chatData.senderUsername}: "${chatData.text}"`);
+      this.chatMessageHandlers.forEach(h => {
+        try {
+          h(chatData);
+        } catch (e) {
+          console.error('[BitChat] Chat message handler error:', e);
+        }
+      });
     } else if (type === 'SYNC_HISTORY') {
       if (Array.isArray(payload.reports)) {
         console.log(`[BitChat] Received ${payload.reports.length} sync reports from mesh gateway`);
@@ -393,6 +414,50 @@ class BitChatMesh {
 
   getConnectedDevices(): Device[] {
     return Array.from(this.connectedDevices.values());
+  }
+
+  setUsername(username: string): void {
+    this.username = username.trim();
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const registerPayload = {
+        type: 'REGISTER',
+        deviceId: this.deviceId,
+        name: this.username || getDeviceName(this.deviceId)
+      };
+      this.sendRaw(registerPayload);
+      console.log(`[BitChat] Re-registered with username: @${this.username}`);
+    }
+  }
+
+  getUsername(): string {
+    return this.username;
+  }
+
+  sendPeerChat(targetDeviceId: string, targetUsername: string, text: string): ChatMessage {
+    const chatMsg: ChatMessage = {
+      id: `chat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      senderId: this.deviceId,
+      senderUsername: this.username || getDeviceName(this.deviceId),
+      targetDeviceId,
+      targetUsername,
+      text: text.trim(),
+      timestamp: Date.now()
+    };
+
+    console.log(`[BitChat] Sending PEER_CHAT to @${targetUsername} (${targetDeviceId}): "${text}"`);
+    this.sendRaw({
+      type: 'PEER_CHAT',
+      chatPayload: chatMsg
+    });
+
+    return { ...chatMsg, isOutgoing: true };
+  }
+
+  onChatMessage(handler: (msg: ChatMessage) => void): () => void {
+    this.chatMessageHandlers.push(handler);
+    return () => {
+      this.chatMessageHandlers = this.chatMessageHandlers.filter(h => h !== handler);
+    };
   }
 
   destroy(): void {

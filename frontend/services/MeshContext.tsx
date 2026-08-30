@@ -1,4 +1,5 @@
-﻿import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Database from './database';
 import BitChatMesh from './bitchat';
 import { getOrCreateDeviceId } from '../utils/deviceId';
@@ -33,6 +34,17 @@ export const MeshProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDeviceId(id);
 
         mesh = new BitChatMesh(id);
+        
+        try {
+          const profileStr = await AsyncStorage.getItem('CRISIS_MESH_USER_PROFILE');
+          if (profileStr) {
+            const prof = JSON.parse(profileStr);
+            if (prof.username || prof.name) {
+              mesh.setUsername(prof.username || prof.name);
+            }
+          }
+        } catch (_) {}
+
         await mesh.initialize();
 
         mesh.onStatusChange((status) => {

@@ -2,6 +2,7 @@ export type Priority = 'CRITICAL' | 'VERY HIGH' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface UserProfile {
   name: string;
+  username?: string;
   email: string;
   address: string;
   bloodType: string;
@@ -39,11 +40,23 @@ export interface RescuePingPayload {
   timestamp: number;
 }
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderUsername: string;
+  targetDeviceId: string;
+  targetUsername?: string;
+  text: string;
+  timestamp: number;
+  isOutgoing?: boolean;
+}
+
 export interface MeshMessage {
   id: string;
-  type: 'SOS' | 'RELAY' | 'SYNC' | 'HEARTBEAT' | 'RESCUE_PING';
+  type: 'SOS' | 'RELAY' | 'SYNC' | 'HEARTBEAT' | 'RESCUE_PING' | 'PEER_CHAT';
   data?: SOSReport;
   pingData?: RescuePingPayload;
+  chatPayload?: ChatMessage;
   targetDeviceId?: string;
   sosId?: string;
   adminName?: string;

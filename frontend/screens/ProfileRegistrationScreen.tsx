@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,13 +19,16 @@ import {
   FLOOD_SIMULATION_KEY,
   ADMIN_PASSCODE
 } from '../utils/constants';
+import { useMesh } from '../services/MeshContext';
 
 export const ProfileRegistrationScreen = ({ navigation, route }: any) => {
+  const { mesh } = useMesh();
   const isEditing = route.params?.isEditing || false;
   const [activeRoleTab, setActiveRoleTab] = useState<'USER' | 'ADMIN'>('USER');
 
   // User Profile Form States
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [age, setAge] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
@@ -52,6 +55,7 @@ export const ProfileRegistrationScreen = ({ navigation, route }: any) => {
         if (stored) {
           const profile: UserProfile = JSON.parse(stored);
           setName(profile.name || '');
+          setUsername(profile.username || '');
           setAge(profile.age ? profile.age.toString() : '');
           setEmail(profile.email || '');
           setAddress(profile.address || '');
@@ -85,6 +89,11 @@ export const ProfileRegistrationScreen = ({ navigation, route }: any) => {
       Alert.alert('Required Field', 'Please enter your full name.');
       return;
     }
+    const cleanUsername = username.trim().replace(/^@/, '');
+    if (!cleanUsername) {
+      Alert.alert('Username Required', 'Please enter a username so other nodes can identify you in mesh chat.');
+      return;
+    }
     const ageNum = parseInt(age, 10);
     if (!ageNum || ageNum < 1 || ageNum > 120) {
       Alert.alert('Invalid Age', 'Please enter a valid age.');
@@ -101,6 +110,7 @@ export const ProfileRegistrationScreen = ({ navigation, route }: any) => {
     setIsSaving(true);
     const profile: UserProfile = {
       name: name.trim(),
+      username: cleanUsername,
       age: ageNum,
       email: email.trim(),
       address: address.trim(),
@@ -116,6 +126,11 @@ export const ProfileRegistrationScreen = ({ navigation, route }: any) => {
       await Database.saveUserProfile(profile);
       await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
       await AsyncStorage.setItem(USER_ROLE_STORAGE_KEY, 'USER');
+
+      // Update mesh username
+      if (mesh) {
+        mesh.setUsername(cleanUsername);
+      }
 
       // Reset Flood Simulation so the flood alert appears fresh for this session
       await AsyncStorage.removeItem(FLOOD_SIMULATION_KEY);
@@ -141,6 +156,9 @@ export const ProfileRegistrationScreen = ({ navigation, route }: any) => {
     }
 
     await AsyncStorage.setItem(USER_ROLE_STORAGE_KEY, 'ADMIN');
+    if (mesh) {
+      mesh.setUsername(responderName.trim() || 'Command Center');
+    }
     Alert.alert(
       'Admin Access Granted',
       `Logged in as First Responder: ${responderName || 'Incident Commander'}. Command Center unlocked.`
@@ -189,6 +207,16 @@ export const ProfileRegistrationScreen = ({ navigation, route }: any) => {
             placeholder="e.g. Advik Thiagarajan"
             value={name}
             onChangeText={setName}
+          />
+
+          <Text style={styles.label}>Mesh Chat Username * (Visible to nearby peers in direct chat)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. advik_01 or PriyaMedic"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
           />
 
           <View style={{ flexDirection: 'row', gap: 12 }}>

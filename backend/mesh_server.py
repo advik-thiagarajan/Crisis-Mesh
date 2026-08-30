@@ -209,6 +209,29 @@ async def handle_client(websocket):
                 }
                 await broadcast_to_peers(ping_packet, sender_ws=websocket)
 
+            elif msg_type == "PEER_CHAT":
+                chat_data = data.get("chatPayload") or data
+                sender_uname = chat_data.get("senderUsername", "User")
+                sender_id = chat_data.get("senderId", "unknown")
+                target_id = chat_data.get("targetDeviceId", "ALL")
+                text = chat_data.get("text", "")
+                print(f"💬 [PEER CHAT] From @{sender_uname} ({sender_id}) -> Target: {target_id}: \"{text}\"")
+
+                chat_packet = {
+                    "id": data.get("id", f"chat-{int(time.time()*1000)}"),
+                    "type": "PEER_CHAT",
+                    "chatPayload": chat_data,
+                    "senderId": sender_id,
+                    "senderUsername": sender_uname,
+                    "targetDeviceId": target_id,
+                    "targetUsername": chat_data.get("targetUsername"),
+                    "text": text,
+                    "relayedBy": connected_clients.get(websocket, {}).get("deviceId", "Gateway"),
+                    "relayCount": (data.get("relayCount") or 0) + 1,
+                    "timestamp": int(time.time() * 1000)
+                }
+                await broadcast_to_peers(chat_packet, sender_ws=websocket)
+
             elif msg_type == "PING":
                 await websocket.send(json.dumps({"type": "PONG", "timestamp": int(time.time() * 1000)}))
 

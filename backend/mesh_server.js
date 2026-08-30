@@ -214,6 +214,23 @@ wss.on('connection', (ws, req) => {
           timestamp: Date.now()
         }, ws);
 
+      } else if (msgType === 'PEER_CHAT') {
+        const chatData = data.chatPayload || data;
+        console.log(`💬 [PEER CHAT] From @${chatData.senderUsername || 'User'} (${chatData.senderId}) -> Target: ${chatData.targetDeviceId || 'ALL'}: "${chatData.text}"`);
+        broadcast({
+          id: data.id || `chat-${Date.now()}`,
+          type: 'PEER_CHAT',
+          chatPayload: chatData,
+          senderId: chatData.senderId,
+          senderUsername: chatData.senderUsername,
+          targetDeviceId: chatData.targetDeviceId,
+          targetUsername: chatData.targetUsername,
+          text: chatData.text,
+          relayedBy: connectedClients.get(ws)?.deviceId || 'Gateway',
+          relayCount: (data.relayCount || 0) + 1,
+          timestamp: chatData.timestamp || Date.now()
+        }, ws);
+
       } else if (msgType === 'PING') {
         ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
       } else if (msgType === 'REQUEST_SYNC') {

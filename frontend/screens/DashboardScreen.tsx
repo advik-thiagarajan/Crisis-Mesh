@@ -3,11 +3,14 @@ import {
   View,
   Text,
   FlatList,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   Modal,
   Alert,
-  ScrollView
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,7 +18,7 @@ import * as Location from 'expo-location';
 import Database from '../services/database';
 import { generateSummary } from '../services/summarizer';
 import { optimizeRoute } from '../services/routeOptimizer';
-import { SOSReport, UserProfile, Priority } from '../utils/types';
+import { SOSReport, UserProfile, Priority, ChatMessage } from '../utils/types';
 import {
   CHENNAI,
   PRIORITY_COLORS,
@@ -66,8 +69,18 @@ export const DashboardScreen = ({ navigation, route }: any) => {
   const [escalationStep, setEscalationStep] = useState<number>(0);
   const [fastDemoMode, setFastDemoMode] = useState<boolean>(false);
 
+  // Direct 1-on-1 Offline Mesh Text Chat States
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
+  const [selectedPeerForChat, setSelectedPeerForChat] = useState<any | null>(null);
+  const [connectedPeers, setConnectedPeers] = useState<any[]>([]);
+  const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
+  const [currentMessageText, setCurrentMessageText] = useState<string>('');
+  const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+  const [incomingToastMessage, setIncomingToastMessage] = useState<ChatMessage | null>(null);
+
   const countdownTimerRef = useRef<any>(null);
   const periodicCheckInTimerRef = useRef<any>(null);
+  const chatScrollRef = useRef<any>(null);
 
   // Load Role, Profile, GPS & Flood Alert
   useEffect(() => {
@@ -84,10 +97,19 @@ export const DashboardScreen = ({ navigation, route }: any) => {
       try {
         const storedProfile = await AsyncStorage.getItem(PROFILE_STORAGE_KEY);
         if (storedProfile) {
-          setUserProfile(JSON.parse(storedProfile));
+          const prof: UserProfile = JSON.parse(storedProfile);
+          setUserProfile(prof);
+          if (mesh && prof.username) {
+            mesh.setUsername(prof.username);
+          }
         } else {
           const dbProfile = await Database.getUserProfile();
-          if (dbProfile) setUserProfile(dbProfile);
+          if (dbProfile) {
+            setUserProfile(dbProfile);
+            if (mesh && dbProfile.username) {
+              mesh.setUsername(dbProfile.username);
+            }
+          }
         }
       } catch (err) {
         console.warn('Could not read user profile:', err);
@@ -132,6 +154,10 @@ export const DashboardScreen = ({ navigation, route }: any) => {
     });
     setReports(sorted);
     setSummaryText(generateSummary(sorted).summary);
+
+    if (mesh) {
+      setConnectedPeers(mesh.getConnectedDevices().filter(p => p.id !== deviceId));
+    }
   };
 
   // Mesh packet listener (SOS + RESCUE_PING)
@@ -147,7 +173,6 @@ export const DashboardScreen = ({ navigation, route }: any) => {
         }
       } else if (msg.type === 'RESCUE_PING') {
         console.log(`[Dashboard] Received RESCUE_PING over mesh:`, msg);
-        // Is this ping for me? Match targetDeviceId, or if current node is in USER role
         const isTarget = !msg.targetDeviceId || msg.targetDeviceId === deviceId || (role === 'USER');
         if (isTarget) {
           console.log('[Dashboard] MATCHED RESCUE_PING for this victim device! Showing modal.');
@@ -164,6 +189,37 @@ export const DashboardScreen = ({ navigation, route }: any) => {
       }
     });
   }, [mesh, deviceId, role]);
+
+  // Mesh 1-on-1 Text Chat Listener
+  useEffect(() => {
+    if (!mesh) return;
+
+    const unsubscribeChat = mesh.onChatMessage((chatMsg: ChatMessage) => {
+      console.log('[Dashboard] Incoming mesh chat:', chatMsg);
+      const peerId = chatMsg.senderId;
+
+      setChatMessages((prev) => {
+        const existing = prev[peerId] || [];
+        return {
+          ...prev,
+          [peerId]: [...existing, chatMsg]
+        };
+      });
+
+      // If chat is not currently open with this sender, show toast & increment unread
+      if (!isChatOpen || selectedPeerForChat?.id !== peerId) {
+        setUnreadChatCount((prev) => prev + 1);
+        setIncomingToastMessage(chatMsg);
+        setTimeout(() => {
+          setIncomingToastMessage(null);
+        }, 5000);
+      }
+    });
+
+    return () => {
+      unsubscribeChat();
+    };
+  }, [mesh, isChatOpen, selectedPeerForChat]);
 
   // Initial Flood Alert: "I am in a safe place"
   const handleSelectSafePlace = async () => {
@@ -248,7 +304,6 @@ export const DashboardScreen = ({ navigation, route }: any) => {
 
   // Broadcast Escalated SOS to Mesh
   const broadcastEscalatedSOS = async (priority: Priority, step: number) => {
-    const medConditions = userProfile?.medicalHistory?.join(', ') || 'None reported';
     const sosPayload: SOSReport = {
       id: `SOS-AUTO-${deviceId.slice(-6)}-${step}`,
       timestamp: Date.now(),
@@ -315,7 +370,36 @@ export const DashboardScreen = ({ navigation, route }: any) => {
     );
   };
 
+  // Handle Sending 1-on-1 Mesh Chat Message
+  const handleSendMessage = () => {
+    if (!selectedPeerForChat || !currentMessageText.trim() || !mesh) return;
+
+    const text = currentMessageText.trim();
+    setCurrentMessageText('');
+
+    const targetUsername = selectedPeerForChat.name || selectedPeerForChat.id.slice(-6);
+    const sentMsg = mesh.sendPeerChat(
+      selectedPeerForChat.id,
+      targetUsername,
+      text
+    );
+
+    setChatMessages((prev) => {
+      const peerId = selectedPeerForChat.id;
+      const existing = prev[peerId] || [];
+      return {
+        ...prev,
+        [peerId]: [...existing, sentMsg]
+      };
+    });
+
+    setTimeout(() => {
+      chatScrollRef.current?.scrollToEnd?.({ animated: true });
+    }, 100);
+  };
+
   const routePlan = optimizeRoute(CHENNAI.LAT, CHENNAI.LNG, reports, 5);
+  const activePeerChatHistory = selectedPeerForChat ? (chatMessages[selectedPeerForChat.id] || []) : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F7FAFC' }}>
@@ -327,7 +411,9 @@ export const DashboardScreen = ({ navigation, route }: any) => {
               {role === 'ADMIN' ? '🛡️ ADMIN COMMAND' : '👤 USER'}
             </Text>
           </View>
-          <Text style={styles.headerDeviceId}>Node: {deviceId.slice(-6)}</Text>
+          <Text style={styles.headerDeviceId}>
+            @{userProfile?.username || deviceId.slice(-6)}
+          </Text>
         </View>
 
         <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -359,6 +445,35 @@ export const DashboardScreen = ({ navigation, route }: any) => {
           </Text>
         </View>
       </TouchableOpacity>
+
+      {/* Floating Incoming Chat Toast Banner */}
+      {incomingToastMessage && (
+        <TouchableOpacity
+          style={styles.chatToastBanner}
+          onPress={() => {
+            const peer = connectedPeers.find(p => p.id === incomingToastMessage.senderId) || {
+              id: incomingToastMessage.senderId,
+              name: incomingToastMessage.senderUsername
+            };
+            setSelectedPeerForChat(peer);
+            setIsChatOpen(true);
+            setIncomingToastMessage(null);
+            setUnreadChatCount(0);
+          }}
+          activeOpacity={0.9}
+        >
+          <Text style={{ fontSize: 20, marginRight: 8 }}>💬</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.chatToastTitle}>
+              Message from @{incomingToastMessage.senderUsername}:
+            </Text>
+            <Text style={styles.chatToastText} numberOfLines={1}>
+              {incomingToastMessage.text}
+            </Text>
+          </View>
+          <Text style={styles.chatToastTap}>Reply ➔</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Incoming Peer Distress Banner (CLICKABLE for Admin to inspect & ping!) */}
       {activeAlert && (
@@ -535,7 +650,6 @@ export const DashboardScreen = ({ navigation, route }: any) => {
                 ]}
                 activeOpacity={0.8}
                 onPress={() => {
-                  // Both user and admin can tap to view full incident details & ping
                   setSelectedIncidentForAdmin(item);
                 }}
               >
@@ -572,7 +686,7 @@ export const DashboardScreen = ({ navigation, route }: any) => {
                 {prof && (
                   <View style={styles.victimProfileBox}>
                     <Text style={styles.victimName}>
-                      👤 {prof.name}, {prof.age}y &nbsp;
+                      👤 {prof.name} {prof.username ? `(@${prof.username})` : ''}, {prof.age}y &nbsp;
                       <Text style={styles.bloodTag}>[Blood: {prof.bloodType}]</Text>
                     </Text>
                     {prof.medicalHistory && prof.medicalHistory.length > 0 && prof.medicalHistory[0] !== 'None' && (
@@ -768,11 +882,32 @@ export const DashboardScreen = ({ navigation, route }: any) => {
         />
       )}
 
-      {/* Floating Action Button for Manual SOS (Visible in User mode) */}
+      {/* Bottom-Left Blue Floating Chat Bubble Icon */}
+      <TouchableOpacity
+        style={styles.chatFab}
+        onPress={() => {
+          if (mesh) {
+            setConnectedPeers(mesh.getConnectedDevices().filter(p => p.id !== deviceId));
+          }
+          setIsChatOpen(true);
+          setUnreadChatCount(0);
+        }}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.chatFabIcon}>💬</Text>
+        {unreadChatCount > 0 && (
+          <View style={styles.chatUnreadBadge}>
+            <Text style={styles.chatUnreadBadgeText}>{unreadChatCount}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      {/* Floating Action Button for Manual SOS (Visible in User mode, Bottom-Right) */}
       {role === 'USER' && (
         <TouchableOpacity
           style={styles.fab}
           onPress={() => navigation.navigate('SOS')}
+          activeOpacity={0.85}
         >
           <Text style={styles.fabText}>+ SOS</Text>
         </TouchableOpacity>
@@ -902,6 +1037,11 @@ export const DashboardScreen = ({ navigation, route }: any) => {
                     <Text style={styles.inspectProfileItem}>
                       Full Name: <Text style={styles.boldVal}>{selectedIncidentForAdmin.userProfile.name}</Text> ({selectedIncidentForAdmin.userProfile.age} years old)
                     </Text>
+                    {selectedIncidentForAdmin.userProfile.username && (
+                      <Text style={styles.inspectProfileItem}>
+                        Mesh Username: <Text style={[styles.boldVal, { color: '#2B6CB0' }]}>@{selectedIncidentForAdmin.userProfile.username}</Text>
+                      </Text>
+                    )}
                     <Text style={styles.inspectProfileItem}>
                       Blood Group: <Text style={[styles.boldVal, { color: '#C53030' }]}>{selectedIncidentForAdmin.userProfile.bloodType}</Text>
                     </Text>
@@ -998,6 +1138,182 @@ export const DashboardScreen = ({ navigation, route }: any) => {
           </View>
         </View>
       </Modal>
+
+      {/* ================= MODAL 5: OFFLINE PEER MESH CHAT MODAL ================= */}
+      <Modal
+        visible={isChatOpen}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => {
+          if (selectedPeerForChat) {
+            setSelectedPeerForChat(null);
+          } else {
+            setIsChatOpen(false);
+          }
+        }}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1, backgroundColor: '#F7FAFC' }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          {/* Chat Header */}
+          <View style={styles.chatModalHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              {selectedPeerForChat ? (
+                <TouchableOpacity
+                  style={styles.chatBackBtn}
+                  onPress={() => setSelectedPeerForChat(null)}
+                >
+                  <Text style={styles.chatBackBtnText}>← Peers</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <View style={{ marginLeft: selectedPeerForChat ? 8 : 0, flex: 1 }}>
+                <Text style={styles.chatHeaderTitle} numberOfLines={1}>
+                  {selectedPeerForChat ? `@${selectedPeerForChat.name || selectedPeerForChat.id.slice(-6)}` : '💬 Mesh Peer Chat'}
+                </Text>
+                <Text style={styles.chatHeaderSubtitle}>
+                  {selectedPeerForChat ? '🟢 Radio Link Active (Offline)' : `${connectedPeers.length} Peer(s) in Radio Range`}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.chatCloseBtn}
+              onPress={() => {
+                setIsChatOpen(false);
+                setSelectedPeerForChat(null);
+              }}
+            >
+              <Text style={styles.chatCloseBtnText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* VIEW A: PEER SELECTION LIST */}
+          {!selectedPeerForChat && (
+            <View style={{ flex: 1, padding: 14 }}>
+              <Text style={styles.peerListSectionTitle}>Select a connected peer to text chat:</Text>
+
+              {connectedPeers.length === 0 ? (
+                <View style={styles.emptyPeersBox}>
+                  <Text style={{ fontSize: 36, marginBottom: 8 }}>📡</Text>
+                  <Text style={styles.emptyPeersTitle}>No Nearby Peers Detected</Text>
+                  <Text style={styles.emptyPeersSub}>
+                    Connect another phone to this Wi-Fi / Hotspot and open CrisisMesh. Their username will appear here automatically!
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={connectedPeers}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => {
+                    const peerHistory = chatMessages[item.id] || [];
+                    const lastMsg = peerHistory.length > 0 ? peerHistory[peerHistory.length - 1] : null;
+                    return (
+                      <TouchableOpacity
+                        style={styles.peerItemCard}
+                        onPress={() => setSelectedPeerForChat(item)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.peerAvatar}>
+                          <Text style={{ fontSize: 18 }}>👤</Text>
+                        </View>
+
+                        <View style={{ flex: 1, marginLeft: 12 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={styles.peerItemName}>@{item.name || item.id.slice(-6)}</Text>
+                            <View style={styles.onlineBadge}>
+                              <Text style={styles.onlineBadgeText}>🟢 Online</Text>
+                            </View>
+                          </View>
+
+                          <Text style={styles.peerItemId}>Hardware Node: {item.id.slice(-6)}</Text>
+
+                          {lastMsg ? (
+                            <Text style={styles.peerLastMsg} numberOfLines={1}>
+                              {lastMsg.isOutgoing ? 'You: ' : ''}{lastMsg.text}
+                            </Text>
+                          ) : (
+                            <Text style={styles.peerStartPrompt}>Tap to start offline radio chat ➔</Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              )}
+            </View>
+          )}
+
+          {/* VIEW B: 1-ON-1 CONVERSATION VIEW */}
+          {selectedPeerForChat && (
+            <View style={{ flex: 1 }}>
+              <ScrollView
+                ref={chatScrollRef}
+                contentContainerStyle={{ padding: 14, flexGrow: 1, justifyContent: activePeerChatHistory.length === 0 ? 'center' : 'flex-start' }}
+              >
+                {activePeerChatHistory.length === 0 ? (
+                  <View style={{ alignItems: 'center', padding: 20 }}>
+                    <Text style={{ fontSize: 32, marginBottom: 8 }}>💬 📻</Text>
+                    <Text style={{ fontWeight: 'bold', color: '#4A5568', fontSize: 15 }}>
+                      Direct Mesh Radio Link
+                    </Text>
+                    <Text style={{ color: '#718096', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                      Send an encrypted peer-to-peer text to @{selectedPeerForChat.name}. Zero internet or cell reception required.
+                    </Text>
+                  </View>
+                ) : (
+                  activePeerChatHistory.map((msg) => {
+                    const isMe = msg.senderId === deviceId || msg.isOutgoing;
+                    return (
+                      <View
+                        key={msg.id}
+                        style={[
+                          styles.chatBubble,
+                          isMe ? styles.chatBubbleOutgoing : styles.chatBubbleIncoming
+                        ]}
+                      >
+                        {!isMe && (
+                          <Text style={styles.chatBubbleSender}>@{msg.senderUsername}</Text>
+                        )}
+                        <Text style={[styles.chatBubbleText, isMe && styles.chatBubbleTextOutgoing]}>
+                          {msg.text}
+                        </Text>
+                        <Text style={[styles.chatBubbleTime, isMe && styles.chatBubbleTimeOutgoing]}>
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                    );
+                  })
+                )}
+              </ScrollView>
+
+              {/* Bottom Chat Input Bar */}
+              <View style={styles.chatInputBar}>
+                <TextInput
+                  style={styles.chatTextInput}
+                  placeholder={`Message @${selectedPeerForChat.name || selectedPeerForChat.id.slice(-6)}...`}
+                  value={currentMessageText}
+                  onChangeText={setCurrentMessageText}
+                  placeholderTextColor="#A0AEC0"
+                  onSubmitEditing={handleSendMessage}
+                  returnKeyType="send"
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.chatSendBtn,
+                    !currentMessageText.trim() && { backgroundColor: '#CBD5E0' }
+                  ]}
+                  onPress={handleSendMessage}
+                  disabled={!currentMessageText.trim()}
+                >
+                  <Text style={styles.chatSendBtnText}>➤</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -1006,7 +1322,7 @@ const styles = StyleSheet.create({
   topControlHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1A202C', paddingHorizontal: 12, paddingVertical: 8 },
   roleBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
   roleBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
-  headerDeviceId: { color: '#A0AEC0', fontSize: 11, fontWeight: '600' },
+  headerDeviceId: { color: '#63B3ED', fontSize: 12, fontWeight: 'bold' },
   headerSettingsBtn: { backgroundColor: '#2D3748', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   headerSettingsText: { fontSize: 14 },
   headerLogoutBtn: { backgroundColor: '#742A2A', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#FEB2B2' },
@@ -1016,6 +1332,12 @@ const styles = StyleSheet.create({
   meshStatusRow: { flexDirection: 'row', alignItems: 'center' },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
   meshStatusText: { color: '#FFF', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+
+  // Floating Chat Toast Banner
+  chatToastBanner: { backgroundColor: '#2B6CB0', flexDirection: 'row', alignItems: 'center', padding: 12, margin: 8, borderRadius: 8, elevation: 6, borderWidth: 1, borderColor: '#63B3ED' },
+  chatToastTitle: { color: '#BEE3F8', fontSize: 11, fontWeight: 'bold' },
+  chatToastText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
+  chatToastTap: { color: '#EBF8FF', fontSize: 11, fontWeight: 'bold', marginLeft: 8 },
 
   // Incoming Alert Banner (Clickable)
   alertBanner: { backgroundColor: '#9B2C2C', padding: 12, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 3, borderColor: '#FEB2B2', elevation: 4 },
@@ -1093,11 +1415,17 @@ const styles = StyleSheet.create({
   ackBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   ackBadgeText: { fontSize: 10, fontWeight: 'bold' },
 
-  // Route & FAB
+  // Route & FABs
   routeCard: { flexDirection: 'row', padding: 12, margin: 10, backgroundColor: '#FFF', borderRadius: 6, elevation: 1 },
   stepIndex: { fontSize: 16, fontWeight: 'bold', color: '#2B6CB0' },
-  fab: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#E53E3E', paddingVertical: 14, paddingHorizontal: 22, borderRadius: 30, elevation: 5 },
+  fab: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#E53E3E', paddingVertical: 14, paddingHorizontal: 22, borderRadius: 30, elevation: 6 },
   fabText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+
+  // Bottom-Left Blue Floating Chat Bubble Icon
+  chatFab: { position: 'absolute', bottom: 20, left: 20, backgroundColor: '#2B6CB0', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#2B6CB0', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5 },
+  chatFabIcon: { fontSize: 26 },
+  chatUnreadBadge: { position: 'absolute', top: -3, right: -3, backgroundColor: '#E53E3E', width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#FFF' },
+  chatUnreadBadgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
 
   // Modals
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'center', alignItems: 'center', padding: 16 },
@@ -1145,5 +1473,43 @@ const styles = StyleSheet.create({
   telemetryText: { fontSize: 11, color: '#4A5568', marginVertical: 1 },
   dispatchRescueBtn: { backgroundColor: '#22543D', paddingVertical: 14, paddingHorizontal: 16, borderRadius: 8, width: '100%', alignItems: 'center', marginTop: 8, elevation: 4 },
   dispatchRescueBtnText: { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
-  dispatchRescueSubText: { color: '#C6F6D5', fontSize: 10, marginTop: 2 }
+  dispatchRescueSubText: { color: '#C6F6D5', fontSize: 10, marginTop: 2 },
+
+  // Offline Peer Mesh Chat Modal Styles
+  chatModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#2B6CB0', paddingHorizontal: 14, paddingVertical: 12, elevation: 4 },
+  chatBackBtn: { backgroundColor: '#1A4971', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  chatBackBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 12 },
+  chatHeaderTitle: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  chatHeaderSubtitle: { color: '#BEE3F8', fontSize: 11, marginTop: 2 },
+  chatCloseBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  chatCloseBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+
+  peerListSectionTitle: { fontSize: 13, fontWeight: 'bold', color: '#4A5568', marginBottom: 12 },
+  emptyPeersBox: { backgroundColor: '#FFF', padding: 24, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', marginTop: 20 },
+  emptyPeersTitle: { fontSize: 15, fontWeight: 'bold', color: '#2D3748', marginBottom: 6 },
+  emptyPeersSub: { fontSize: 12, color: '#718096', textAlign: 'center', lineHeight: 18 },
+
+  peerItemCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 10, marginBottom: 10, elevation: 1, borderWidth: 1, borderColor: '#E2E8F0' },
+  peerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EBF8FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#BEE3F8' },
+  peerItemName: { fontSize: 15, fontWeight: 'bold', color: '#2D3748' },
+  peerItemId: { fontSize: 11, color: '#718096', marginTop: 1 },
+  peerLastMsg: { fontSize: 12, color: '#4A5568', marginTop: 3, fontStyle: 'italic' },
+  peerStartPrompt: { fontSize: 11, color: '#2B6CB0', fontWeight: 'bold', marginTop: 3 },
+  onlineBadge: { backgroundColor: '#C6F6D5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 },
+  onlineBadgeText: { color: '#22543D', fontSize: 10, fontWeight: 'bold' },
+
+  // Message Bubbles
+  chatBubble: { maxWidth: '80%', padding: 10, borderRadius: 12, marginBottom: 8 },
+  chatBubbleOutgoing: { alignSelf: 'flex-end', backgroundColor: '#2B6CB0', borderBottomRightRadius: 2 },
+  chatBubbleIncoming: { alignSelf: 'flex-start', backgroundColor: '#EDF2F7', borderBottomLeftRadius: 2 },
+  chatBubbleSender: { fontSize: 10, fontWeight: 'bold', color: '#4A5568', marginBottom: 2 },
+  chatBubbleText: { fontSize: 14, color: '#1A202C' },
+  chatBubbleTextOutgoing: { color: '#FFF' },
+  chatBubbleTime: { fontSize: 9, color: '#718096', alignSelf: 'flex-end', marginTop: 4 },
+  chatBubbleTimeOutgoing: { color: '#BEE3F8' },
+
+  chatInputBar: { flexDirection: 'row', padding: 10, backgroundColor: '#FFF', borderTopWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
+  chatTextInput: { flex: 1, backgroundColor: '#F7FAFC', borderWidth: 1, borderColor: '#CBD5E0', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14, color: '#1A202C', maxHeight: 100 },
+  chatSendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#2B6CB0', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  chatSendBtnText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' }
 });

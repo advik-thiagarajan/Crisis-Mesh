@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import websockets
 
 async def test_mesh_network():
@@ -115,6 +116,50 @@ async def test_mesh_network():
                     assert received["targetDeviceId"] == "test-phone-1"
                     assert "Rescue team dispatched" in received["message"]
                     print(f"  [OK] Node 1 (Victim) received RESCUE_PING: '{received['message']}' from {received['adminName']}")
+                    break
+
+            # Node 1 sends PEER_CHAT to Node 2
+            chat_msg_1 = {
+                "type": "PEER_CHAT",
+                "id": "chat-001",
+                "senderId": "test-phone-1",
+                "senderUsername": "advik_t",
+                "targetDeviceId": "test-phone-2",
+                "targetUsername": "priya_medic",
+                "text": "Hey Priya, are you safe in the flood zone?",
+                "timestamp": int(time.time() * 1000)
+            }
+            await ws1.send(json.dumps(chat_msg_1))
+            print("  [OK] Node 1 (@advik_t) transmitted PEER_CHAT to Node 2.")
+
+            while True:
+                received = json.loads(await ws2.recv())
+                if received["type"] == "PEER_CHAT" and received.get("id") == "chat-001":
+                    assert received["senderUsername"] == "advik_t"
+                    assert "are you safe" in received["text"]
+                    print(f"  [OK] Node 2 received PEER_CHAT from @{received['senderUsername']}: '{received['text']}'")
+                    break
+
+            # Node 2 replies back to Node 1
+            chat_msg_2 = {
+                "type": "PEER_CHAT",
+                "id": "chat-002",
+                "senderId": "test-phone-2",
+                "senderUsername": "priya_medic",
+                "targetDeviceId": "test-phone-1",
+                "targetUsername": "advik_t",
+                "text": "Yes Advik, safe on the 2nd floor with medical supplies!",
+                "timestamp": int(time.time() * 1000)
+            }
+            await ws2.send(json.dumps(chat_msg_2))
+            print("  [OK] Node 2 (@priya_medic) replied with PEER_CHAT to Node 1.")
+
+            while True:
+                received = json.loads(await ws1.recv())
+                if received["type"] == "PEER_CHAT" and received.get("id") == "chat-002":
+                    assert received["senderUsername"] == "priya_medic"
+                    assert "safe on the 2nd floor" in received["text"]
+                    print(f"  [OK] Node 1 received reply from @{received['senderUsername']}: '{received['text']}'")
                     break
 
     print("\nALL OFFLINE MESH PEER-TO-PEER TESTS PASSED SUCCESSFULLY!")

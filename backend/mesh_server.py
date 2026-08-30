@@ -186,6 +186,29 @@ async def handle_client(websocket):
 
                 await broadcast_to_peers(mesh_packet, sender_ws=websocket)
 
+            elif msg_type == "RESCUE_PING":
+                print("\n" + "="*60)
+                print(f"🚑 [ADMIN RESCUE PING DISPATCHED]")
+                print(f"   From:        {data.get('adminName', 'Incident Commander')}")
+                print(f"   Target Node: {data.get('targetDeviceId')}")
+                print(f"   SOS ID:      {data.get('sosId')}")
+                print(f"   Message:     {data.get('message')}")
+                print(f"   Fanning out to all mesh peers...")
+                print("="*60 + "\n")
+
+                ping_packet = {
+                    "id": data.get("id", f"ping-{int(time.time()*1000)}"),
+                    "type": "RESCUE_PING",
+                    "targetDeviceId": data.get("targetDeviceId"),
+                    "sosId": data.get("sosId"),
+                    "adminName": data.get("adminName"),
+                    "message": data.get("message"),
+                    "relayedBy": connected_clients.get(websocket, {}).get("deviceId", "Gateway"),
+                    "relayCount": (data.get("relayCount") or 0) + 1,
+                    "timestamp": int(time.time() * 1000)
+                }
+                await broadcast_to_peers(ping_packet, sender_ws=websocket)
+
             elif msg_type == "PING":
                 await websocket.send(json.dumps({"type": "PONG", "timestamp": int(time.time() * 1000)}))
 

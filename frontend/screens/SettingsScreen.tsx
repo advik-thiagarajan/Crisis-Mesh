@@ -3,7 +3,12 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Database from '../services/database';
 import { useMesh } from '../services/MeshContext';
-import { MESH_SERVER_CONFIG, PROFILE_STORAGE_KEY, FLOOD_SIMULATION_KEY } from '../utils/constants';
+import {
+  MESH_SERVER_CONFIG,
+  PROFILE_STORAGE_KEY,
+  FLOOD_SIMULATION_KEY,
+  USER_ROLE_STORAGE_KEY
+} from '../utils/constants';
 import { detectBundlerHost } from '../services/bitchat';
 import { UserProfile } from '../utils/types';
 
@@ -13,10 +18,14 @@ export const SettingsScreen = ({ navigation }: any) => {
   const [gatewayPort, setGatewayPort] = useState(MESH_SERVER_CONFIG.DEFAULT_PORT.toString());
   const [peers, setPeers] = useState<any[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [currentRole, setCurrentRole] = useState<string>('USER');
 
   useEffect(() => {
     (async () => {
       try {
+        const role = await AsyncStorage.getItem(USER_ROLE_STORAGE_KEY);
+        if (role) setCurrentRole(role);
+
         const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY);
         if (stored) {
           setUserProfile(JSON.parse(stored));
@@ -94,17 +103,51 @@ export const SettingsScreen = ({ navigation }: any) => {
     Alert.alert('Test Transmitted', `Broadcasted diagnostic packet to ${peerCount} connected peer(s).`);
   };
 
-  const handleResetFloodSimulation = async () => {
+  // Fixed Simulate Disaster Handler: clears state and immediately navigates to Dashboard with trigger flag!
+  const handleTriggerSimulatedFlood = async () => {
     await AsyncStorage.removeItem(FLOOD_SIMULATION_KEY);
     Alert.alert(
-      'Simulation Reset',
-      'Flood Disaster simulation state has been reset. When you return to the Dashboard, the emergency alert will trigger fresh!'
+      '🌊 Triggering Flood Simulation',
+      'Returning to Dashboard. The Severe Heavy Flood Alert will launch immediately on screen!',
+      [
+        {
+          text: 'Proceed to Dashboard',
+          onPress: () => {
+            navigation.navigate('Dashboard', { triggerFloodAlert: true });
+          }
+        }
+      ]
+    );
+  };
+
+  const handleLogOut = () => {
+    Alert.alert(
+      'Confirm Logout',
+      'Do you want to log out and return to the User/Admin login screen?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            await AsyncStorage.removeItem(FLOOD_SIMULATION_KEY);
+            navigation.replace('ProfileRegistration');
+          }
+        }
+      ]
     );
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>CrisisMesh Node Diagnostics</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <Text style={styles.title}>CrisisMesh Node Diagnostics</Text>
+        <View style={[styles.roleBadge, { backgroundColor: currentRole === 'ADMIN' ? '#FED7D7' : '#BEE3F8' }]}>
+          <Text style={[styles.roleBadgeText, { color: currentRole === 'ADMIN' ? '#9B2C2C' : '#2B6CB0' }]}>
+            {currentRole === 'ADMIN' ? '🛡️ ADMIN' : '👤 USER'}
+          </Text>
+        </View>
+      </View>
 
       {/* Emergency Medical Profile Card */}
       <View style={[styles.section, { borderColor: '#E53E3E', borderWidth: 1.5 }]}>
@@ -123,12 +166,16 @@ export const SettingsScreen = ({ navigation }: any) => {
         {userProfile ? (
           <View style={styles.profileSummaryBox}>
             <Text style={styles.profileName}>{userProfile.name}, {userProfile.age}y</Text>
-            <Text style={styles.profileDetail}>🩸 Blood Group: <Text style={{ fontWeight: 'bold', color: '#C53030' }}>{userProfile.bloodType}</Text></Text>
+            <Text style={styles.profileDetail}>
+              🩸 Blood Group: <Text style={{ fontWeight: 'bold', color: '#C53030' }}>{userProfile.bloodType}</Text>
+            </Text>
             <Text style={styles.profileDetail}>
               ⚠️ Pre-known Conditions: {userProfile.medicalHistory?.join(', ') || 'None'}
               {userProfile.customMedicalNotes ? ` (${userProfile.customMedicalNotes})` : ''}
             </Text>
-            <Text style={styles.profileDetail}>📞 Emergency Contact: {userProfile.emergencyContactName} ({userProfile.emergencyContactNumber})</Text>
+            <Text style={styles.profileDetail}>
+              📞 Emergency Contact: {userProfile.emergencyContactName} ({userProfile.emergencyContactNumber})
+            </Text>
             {userProfile.address ? <Text style={styles.profileDetail}>🏠 Address: {userProfile.address}</Text> : null}
           </View>
         ) : (
@@ -139,6 +186,20 @@ export const SettingsScreen = ({ navigation }: any) => {
             <Text style={styles.buttonText}>+ Create Emergency Medical Profile</Text>
           </TouchableOpacity>
         )}
+      </View>
+
+      {/* Disaster Simulation Trigger (FIXED) */}
+      <View style={[styles.section, { borderColor: '#319795', borderWidth: 1.5, backgroundColor: '#E6FFFA' }]}>
+        <Text style={[styles.sectionHeader, { color: '#234E52' }]}>🌊 Disaster Simulation Controls:</Text>
+        <Text style={styles.hintText}>
+          Reset and immediately launch the simulated heavy flood disaster alert and safety check-in countdown.
+        </Text>
+        <TouchableOpacity 
+          style={[styles.button, { backgroundColor: '#319795' }]} 
+          onPress={handleTriggerSimulatedFlood}
+        >
+          <Text style={styles.buttonText}>🌊 Launch Simulated Heavy Flood Alert Now</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Local Hardware Node Status */}
@@ -207,21 +268,21 @@ export const SettingsScreen = ({ navigation }: any) => {
         </View>
       </View>
 
-      {/* Simulation & Demo Actions */}
+      {/* Diagnostic & Log Out Actions */}
       <View style={styles.section}>
-        <Text style={styles.sectionHeader}>Disaster Simulation & Testing:</Text>
-        <TouchableOpacity 
-          style={[styles.button, { backgroundColor: '#319795' }]} 
-          onPress={handleResetFloodSimulation}
-        >
-          <Text style={styles.buttonText}>🌊 Re-trigger Simulated Heavy Flood Alert</Text>
-        </TouchableOpacity>
-
+        <Text style={styles.sectionHeader}>Session & Testing:</Text>
         <TouchableOpacity 
           style={[styles.button, { backgroundColor: '#DD6B20' }]} 
           onPress={handleBroadcastTestSOS}
         >
           <Text style={styles.buttonText}>📡 Transmit Diagnostic Test Alert</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[styles.button, { backgroundColor: '#C53030', marginTop: 6 }]} 
+          onPress={handleLogOut}
+        >
+          <Text style={styles.buttonText}>🚪 Log Out & Switch Role</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -230,7 +291,9 @@ export const SettingsScreen = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
   container: { padding: 16, backgroundColor: '#F7FAFC' },
-  title: { fontSize: 18, fontWeight: 'bold', marginBottom: 16, color: '#2D3748' },
+  title: { fontSize: 18, fontWeight: 'bold', color: '#2D3748' },
+  roleBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  roleBadgeText: { fontSize: 11, fontWeight: 'bold' },
   infoBox: { padding: 14, backgroundColor: '#EDF2F7', borderRadius: 8, marginBottom: 16 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   infoLabel: { fontSize: 14, fontWeight: 'bold', color: '#2D3748' },

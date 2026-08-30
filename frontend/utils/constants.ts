@@ -57,6 +57,8 @@ export const MESH_SERVER_CONFIG = {
 
 export const PROFILE_STORAGE_KEY = 'CRISIS_MESH_USER_PROFILE';
 export const FLOOD_SIMULATION_KEY = 'CRISIS_MESH_FLOOD_SIMULATION_STATE';
+export const USER_ROLE_STORAGE_KEY = 'CRISIS_MESH_USER_ROLE';
+export const ADMIN_PASSCODE = 'COMMAND7';
 
 export const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'] as const;
 

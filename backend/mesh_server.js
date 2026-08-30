@@ -192,6 +192,28 @@ wss.on('connection', (ws, req) => {
           timestamp: Date.now()
         }, ws);
 
+      } else if (msgType === 'RESCUE_PING') {
+        console.log('\n============================================================');
+        console.log('🚑 [ADMIN RESCUE PING DISPATCHED]');
+        console.log(`   From:        ${data.adminName || 'Incident Commander'}`);
+        console.log(`   Target Node: ${data.targetDeviceId}`);
+        console.log(`   SOS ID:      ${data.sosId}`);
+        console.log(`   Message:     ${data.message}`);
+        console.log(`   Fanning out to all mesh peers...`);
+        console.log('============================================================\n');
+
+        broadcast({
+          id: data.id || `ping-${Date.now()}`,
+          type: 'RESCUE_PING',
+          targetDeviceId: data.targetDeviceId,
+          sosId: data.sosId,
+          adminName: data.adminName,
+          message: data.message,
+          relayedBy: connectedClients.get(ws)?.deviceId || 'Gateway',
+          relayCount: (data.relayCount || 0) + 1,
+          timestamp: Date.now()
+        }, ws);
+
       } else if (msgType === 'PING') {
         ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now() }));
       } else if (msgType === 'REQUEST_SYNC') {

@@ -200,6 +200,20 @@ class BitChatMesh {
         timestamp: payload.timestamp || Date.now()
       };
       this.handleIncomingMessage(meshMsg);
+    } else if (type === 'RESCUE_PING') {
+      const meshMsg: MeshMessage = {
+        id: payload.id || `ping-${Date.now()}`,
+        type: 'RESCUE_PING',
+        targetDeviceId: payload.targetDeviceId,
+        sosId: payload.sosId,
+        adminName: payload.adminName || 'Incident Command',
+        message: payload.message || 'Help is arriving! First responders have acknowledged your distress call and are en route.',
+        relayedBy: payload.relayedBy || 'Gateway',
+        relayCount: payload.relayCount || 1,
+        timestamp: payload.timestamp || Date.now()
+      };
+      console.log(`[BitChat] Received RESCUE_PING for target: ${meshMsg.targetDeviceId}, SOS: ${meshMsg.sosId}`);
+      this.handleIncomingMessage(meshMsg);
     } else if (type === 'SYNC_HISTORY') {
       if (Array.isArray(payload.reports)) {
         console.log(`[BitChat] Received ${payload.reports.length} sync reports from mesh gateway`);
@@ -303,14 +317,30 @@ class BitChatMesh {
     }
   }
 
+  sendRescuePing(targetDeviceId: string, sosId: string, adminName: string = 'Command Center'): void {
+    const payload = {
+      type: 'RESCUE_PING',
+      id: `PING-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      targetDeviceId,
+      sosId,
+      adminName,
+      message: 'Help is arriving! First responders have acknowledged your distress call and are en route.',
+      timestamp: Date.now(),
+      relayedBy: this.deviceId,
+      relayCount: 0
+    };
+    console.log(`[BitChat] Transmitting RESCUE_PING for target: ${targetDeviceId}, SOS: ${sosId}`);
+    this.sendRaw(payload);
+  }
+
   private handleIncomingMessage(message: MeshMessage): void {
-    const sosId = message.data?.id || message.id;
-    if (this.seenMessageIds.has(sosId)) {
+    const msgId = message.data?.id || message.id;
+    if (this.seenMessageIds.has(msgId)) {
       return;
     }
-    this.seenMessageIds.add(sosId);
+    this.seenMessageIds.add(msgId);
 
-    console.log(`[BitChat] New mesh message received: ${sosId} (${message.data?.priority})`);
+    console.log(`[BitChat] New mesh message received: ${msgId} (Type: ${message.type})`);
 
     this.messageHandlers.forEach(handler => {
       try {

@@ -97,6 +97,26 @@ async def test_mesh_network():
                     print(f"  [OK] Node 2 received escalated SOS: {received['data']['userProfile']['name']} (Blood: {received['data']['userProfile']['bloodType']}, Med: {received['data']['userProfile']['medicalHistory']})")
                     break
 
+            # Node 2 (Admin) sends RESCUE_PING to Node 1 (Victim)
+            ping_payload = {
+                "type": "RESCUE_PING",
+                "id": "ping-test-201",
+                "targetDeviceId": "test-phone-1",
+                "sosId": "SOS-AUTO-TEST-001",
+                "adminName": "Incident Commander",
+                "message": "Rescue team dispatched and en route to your coordinates."
+            }
+            await ws2.send(json.dumps(ping_payload))
+            print("  [OK] Node 2 (Admin) transmitted RESCUE_PING to Node 1.")
+
+            while True:
+                received = json.loads(await ws1.recv())
+                if received["type"] == "RESCUE_PING":
+                    assert received["targetDeviceId"] == "test-phone-1"
+                    assert "Rescue team dispatched" in received["message"]
+                    print(f"  [OK] Node 1 (Victim) received RESCUE_PING: '{received['message']}' from {received['adminName']}")
+                    break
+
     print("\nALL OFFLINE MESH PEER-TO-PEER TESTS PASSED SUCCESSFULLY!")
 
 if __name__ == "__main__":

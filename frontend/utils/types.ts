@@ -31,10 +31,23 @@ export interface SOSReport {
   isAutomated?: boolean;
 }
 
+export interface RescuePingPayload {
+  targetDeviceId: string;
+  sosId: string;
+  adminName: string;
+  message: string;
+  timestamp: number;
+}
+
 export interface MeshMessage {
   id: string;
-  type: 'SOS' | 'RELAY' | 'SYNC' | 'HEARTBEAT';
-  data: SOSReport;
+  type: 'SOS' | 'RELAY' | 'SYNC' | 'HEARTBEAT' | 'RESCUE_PING';
+  data?: SOSReport;
+  pingData?: RescuePingPayload;
+  targetDeviceId?: string;
+  sosId?: string;
+  adminName?: string;
+  message?: string;
   relayedBy: string;
   relayCount: number;
   timestamp: number;
